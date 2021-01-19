@@ -27,3 +27,4 @@
 
 export { default as Server } from './server.js'
 export { default as Client } from './client.js'
+export { HazelMessage, HazelBuffer } from './data.js'

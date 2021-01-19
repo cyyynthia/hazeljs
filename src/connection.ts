@@ -27,25 +27,27 @@
 
 import type { Socket, RemoteInfo } from 'dgram'
 import TypedEventEmitter from './emitter.js'
+import { HazelMessage, HazelBuffer } from './data.js'
 import { HAZEL_VERSION, PacketType } from './constants.js'
 
 type ConnectionEvents = {
   hello: (msg: Buffer) => void
-  message: (msg: { tag: number, payload: Buffer }) => void
+  message: (msg: HazelMessage) => void
 
   close: () => void
   data: (msg: Buffer) => void
 }
 
 export default class Connection extends TypedEventEmitter<ConnectionEvents> {
-  private readonly pingTimer = setInterval(() => this.ping(), 1500)
-  private pendingPings = new Set()
+  private readonly pingTimer = setInterval(() => this.sendPing(), 1500)
+  private pendingPings = new Map<number, number>()
   private pendingAck = new Set()
+  private lastPings = [ 0, 0, 0, 0, 0 ]
   private seenHello = false
-  private _nonce = 0
-  private get nonce () {
-    this._nonce = (this._nonce + 1) % 65535
-    return this._nonce
+  private nonce = 0
+
+  get ping () {
+    return this.lastPings.reduce((a, b) => a + b, 0) / 5
   }
 
   constructor (private readonly remote: RemoteInfo, private readonly socket: Socket) {
@@ -53,6 +55,16 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
 
     this.once('close', () => clearInterval(this.pingTimer))
     this.on('data', (msg) => this.handleMessage(msg))
+  }
+
+  // @ts-ignore
+  async sendNormal (message: HazelMessage) { // todo
+  }
+
+  // @ts-ignore
+  async sendReliable (message: HazelMessage) { // todo
+    // @ts-ignore
+    const nonce = this.getNonce()
   }
 
   async disconnect (force?: boolean) { // todo: reason & message
@@ -72,7 +84,7 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
     })
   }
 
-  private async acknowledge (nonce: number): Promise<number> {
+  private async sendAck (nonce: number): Promise<number> {
     let pending = 0
     for (let i = 1; i <= 8; i++) {
       if (!this.pendingAck.has(nonce - i)) {
@@ -87,13 +99,13 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
     return this.sendRaw(buf)
   }
 
-  private async ping (): Promise<number> {
+  private async sendPing (): Promise<number> {
     if (this.pendingPings.size >= 10) {
       return this.disconnect(true)
     }
 
-    const nonce = this.nonce
-    this.pendingPings.add(nonce)
+    const nonce = this.getNonce()
+    this.pendingPings.set(nonce, Date.now())
     this.pendingAck.add(nonce)
 
     const buf = Buffer.alloc(3)
@@ -117,7 +129,11 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
       case PacketType.ACKNOWLEDGEMENT:
         if (msg.length >= 3) {
           const id = msg.readUInt16BE(1)
-          this.pendingPings.delete(id)
+          if (this.pendingPings.has(id)) {
+            this.lastPings.shift()
+            this.lastPings.push(Date.now() - this.pendingPings.get(id)!)
+            this.pendingPings.delete(id)
+          }
           this.pendingAck.delete(id)
         }
         break
@@ -125,7 +141,7 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
         // Not implemented in Hazel yet, but it exists apparently.
         break
       case PacketType.PING:
-        if (msg.length >= 3) this.acknowledge(msg.readUInt16BE(1))
+        if (msg.length >= 3) this.sendAck(msg.readUInt16BE(1))
         break
     }
   }
@@ -137,7 +153,7 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
       return
     }
 
-    if (ack) this.acknowledge(msg.readUInt16BE(1))
+    if (ack) this.sendAck(msg.readUInt16BE(1))
     const isHello = msg[0] === PacketType.HELLO
     if (isHello) {
       if (this.seenHello || msg.length < 4) {
@@ -159,7 +175,14 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
     while (cursor < msg.length) {
       const length = msg.readUInt16BE(cursor)
       const tag = msg.readUInt8(cursor += 2)
-      this.emit('message', { tag: tag, payload: msg.slice(++cursor, cursor += length) })
+      const data = new HazelBuffer(msg.slice(++cursor, cursor += length))
+
+      this.emit('message', { tag: tag, data: data })
     }
+  }
+
+  private getNonce () {
+    this.nonce = (this.nonce + 1) % 65535
+    return this.nonce
   }
 }

@@ -7,7 +7,6 @@ should because udp is a bitch), and only supports the server-side (and probably 
 It's currently lacking some very important stuff:
  - being able to send messages (lol)
  - full support of the disconnect payload
- - utils to read stuff Buffer cannot easily
 
 ## Requirements
 NodeJS 14+ (HazelJS is esm only)
