@@ -53,18 +53,21 @@ export default class Server extends TypedEventEmitter<ServerEvents> {
     this.socket.on('close', () => this.emit('close'))
   }
 
-  listen (port?: number, bind?: string): Promise<void> {
+  async listen (port?: number, bind?: string): Promise<void> {
     return new Promise<void>((resolve) => this.socket.bind(port, bind, () => resolve()))
   }
 
-  close (): Promise<void> {
+  async close (): Promise<void> {
     return new Promise<void>((resolve) => {
+      const disconnectPromises = []
       for (const connection of this.connections.values()) {
         // todo: send a message once its supported
-        connection.disconnect()
+        disconnectPromises.push(connection.disconnect())
       }
 
-      this.socket.close(() => resolve())
+      Promise.allSettled(disconnectPromises).then(() => {
+        this.socket.close(() => resolve())
+      })
     })
   }
 

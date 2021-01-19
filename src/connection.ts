@@ -55,16 +55,24 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
     this.on('data', (msg) => this.handleMessage(msg))
   }
 
-  disconnect (force?: boolean) { // todo: reason & message
-    this.sendRaw(Buffer.from([ PacketType.DISCONNECT, force ? 0 : 1 ]))
+  async disconnect (force?: boolean) { // todo: reason & message
     this.emit('close')
+    return this.sendRaw(Buffer.from([ PacketType.DISCONNECT, force ? 0 : 1 ]))
   }
 
-  private sendRaw (data: Buffer) {
-    this.socket.send(data, this.remote.port, this.remote.address)
+  private async sendRaw (data: Buffer): Promise<number> {
+    return new Promise((resolve, reject) => {
+      this.socket.send(data, this.remote.port, this.remote.address, (err, bytes) => {
+        if (err) {
+          reject(err)
+        } else {
+          resolve(bytes)
+        }
+      })
+    })
   }
 
-  private acknowledge (nonce: number) {
+  private async acknowledge (nonce: number): Promise<number> {
     let pending = 0
     for (let i = 1; i <= 8; i++) {
       if (!this.pendingAck.has(nonce - i)) {
@@ -76,22 +84,22 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
     buf.writeUInt8(PacketType.ACKNOWLEDGEMENT)
     buf.writeUInt16BE(nonce, 1)
     buf.writeUInt8(pending, 3)
-    this.sendRaw(buf)
+    return this.sendRaw(buf)
   }
 
-  private ping () {
+  private async ping (): Promise<number> {
     if (this.pendingPings.size >= 10) {
-      this.disconnect(true)
-      return
+      return this.disconnect(true)
     }
 
     const nonce = this.nonce
     this.pendingPings.add(nonce)
     this.pendingAck.add(nonce)
+
     const buf = Buffer.alloc(3)
     buf.writeUInt8(PacketType.PING)
     buf.writeUInt16BE(nonce, 1)
-    this.sendRaw(buf)
+    return this.sendRaw(buf)
   }
 
   private handleMessage (msg: Buffer) {
