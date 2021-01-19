@@ -96,7 +96,7 @@ export default class Server extends TypedEventEmitter<ServerEvents> {
     const ip = `${remote.address}:${remote.port}`
     if (!this.connections.has(ip)) {
       if (msg[0] === PacketType.HELLO) {
-        const connection = new Connection(remote, this)
+        const connection = new Connection(remote, this.socket)
         this.emit('connection', connection)
         this.connections.set(ip, connection)
 

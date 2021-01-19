@@ -25,5 +25,13 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-export { default as Server } from './server.js'
-export { default as Client } from './client.js'
+import TypedEventEmitter from './emitter.js'
+
+type ClientEvents = {}
+
+export default class Client extends TypedEventEmitter<ClientEvents> {
+  constructor () {
+    super()
+    throw new Error('Not implemented')
+  }
+}

@@ -25,8 +25,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-import type { RemoteInfo } from 'dgram'
-import type Server from './server.js'
+import type { Socket, RemoteInfo } from 'dgram'
 import TypedEventEmitter from './emitter.js'
 import { HAZEL_VERSION, PacketType } from './constants.js'
 
@@ -49,7 +48,7 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
     return this._nonce
   }
 
-  constructor (private readonly remote: RemoteInfo, private readonly server: Server) {
+  constructor (private readonly remote: RemoteInfo, private readonly socket: Socket) {
     super()
 
     this.once('close', () => clearInterval(this.pingTimer))
@@ -62,7 +61,7 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
   }
 
   private sendRaw (data: Buffer) {
-    this.server.send(data, this.remote)
+    this.socket.send(data, this.remote.port, this.remote.address)
   }
 
   private acknowledge (nonce: number) {
