@@ -1,0 +1,24 @@
+{
+  "name": "@cyyynthia/hazeljs",
+  "version": "0.1.0",
+  "description": "TypeScript implementation of the Hazel-Networking C# net library.",
+  "main": "./dist/index.js",
+  "type": "module",
+  "repository": "git@github.com:cyyynthia/hazeljs.git",
+  "author": "Cynthia <cynthia@cynthia.dev>",
+  "license": "BSD-3-Clause",
+  "engines": {
+    "node": ">= 14",
+    "pnpm": ">= 5.15"
+  },
+  "scripts": {
+    "dev": "tsc-watch --onSuccess \"node ./dist/index.js\"",
+    "build": "tsc"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^14.14.21",
+    "tsc-watch": "^4.2.9",
+    "typescript": "^4.1.3"
+  }
+}
