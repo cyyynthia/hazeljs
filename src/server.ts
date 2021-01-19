@@ -39,12 +39,13 @@ type ServerEvents = {
 }
 
 export default class Server extends TypedEventEmitter<ServerEvents> {
-  private readonly socket = createSocket('udp4')
+  private readonly socket
   private readonly connections = new Map<string, Connection>()
 
-  constructor () {
+  constructor (ipv6?: boolean) {
     super()
 
+    this.socket = createSocket(ipv6 ? 'udp6' : 'udp4')
     this.socket.on('message', this.handleMessage.bind(this))
 
     // Proxy events
@@ -52,42 +53,19 @@ export default class Server extends TypedEventEmitter<ServerEvents> {
     this.socket.on('close', () => this.emit('close'))
   }
 
-  send (data: Buffer, to: RemoteInfo): Promise<number>
-  send (data: Buffer, to: RemoteInfo, callback: (error: Error | null, bytes: number) => void): void
-  send (data: Buffer, to: RemoteInfo, callback?: (error: Error | null, bytes: number) => void) {
-    if (callback) {
-      this.socket.send(data, to.port, to.address, callback)
-    } else {
-      return new Promise<number>((resolve, reject) => {
-        this.socket.send(data, to.port, to.address, (err, bytes) => {
-          if (err) {
-            reject(err)
-          } else {
-            resolve(bytes)
-          }
-        })
-      })
-    }
+  listen (port?: number, bind?: string): Promise<void> {
+    return new Promise<void>((resolve) => this.socket.bind(port, bind, () => resolve()))
   }
 
-  listen (port?: number, bind?: string): Promise<void>
-  listen (port: number | undefined, bind: string | undefined, callback: () => void): void
-  listen (port?: number, bind?: string, callback?: () => void) {
-    if (callback) {
-      this.socket.bind(port, bind, callback)
-    } else {
-      return new Promise<void>((resolve) => this.socket.bind(port, bind, () => resolve()))
-    }
-  }
+  close (): Promise<void> {
+    return new Promise<void>((resolve) => {
+      for (const connection of this.connections.values()) {
+        // todo: send a message once its supported
+        connection.disconnect()
+      }
 
-  close (): Promise<void>
-  close (callback: () => void): void
-  close (callback?: () => void) {
-    if (callback) {
-      this.socket.close(callback)
-    } else {
-      return new Promise<void>((resolve) => this.socket.close(() => resolve()))
-    }
+      this.socket.close(() => resolve())
+    })
   }
 
   private handleMessage (msg: Buffer, remote: RemoteInfo) {
