@@ -156,6 +156,7 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
       this.lastPings.push(Date.now() - pingTime)
     })
 
+    this.pendingPings++
     const buf = HazelBuffer.alloc(3)
     buf.writeByte(PacketType.PING)
     buf.writeUInt16(nonce, 1)
