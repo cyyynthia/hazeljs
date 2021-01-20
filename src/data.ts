@@ -98,15 +98,15 @@ export class HazelBuffer {
     return this.writePackedUInt32(int >= 0 ? (int * 2) : ((int * -2) - 1), offset)
   }
 
-  readPackedUInt32 (offset?: number): number {
+  readPackedUInt32 (offset: number = 0): number {
     let res = 0
     let shift = 0
-    let cursor = offset ?? 0
+    let cursor = offset
     let byte: number
 
     do {
       if (cursor >= this.buf.length || shift > 21) throw new RangeError('Could not decode varint')
-      byte = this.readByte(cursor++)
+      byte = this.buf.readUInt8(cursor++)
       res += (byte & 0x7F) << shift
       shift += 7
     } while (byte >= 0x80)
@@ -114,37 +114,56 @@ export class HazelBuffer {
     return res
   }
 
-  writePackedUInt32 (int: number, offset?: number) {
+  writePackedUInt32 (int: number, offset: number = 0) {
     let cursor = 0
-    offset = offset ?? 0
 
     while (int & -0x80) {
-      this.writeByte((int & 0xff) | 0x80, offset + cursor++)
+      this.buf.writeUInt8((int & 0xff) | 0x80, offset + cursor++)
       int >>>= 7
     }
 
-    this.writeByte(int | 0, offset + cursor)
+    this.buf.writeUInt8(int | 0, offset + cursor)
     return cursor
   }
 
-  readString (offset?: number): string {
+  readString (offset: number = 0): string {
     const len = this.readPackedUInt32(offset)
     const read = HazelBuffer.getPackedUInt32Size(len)
-    const begin = offset ? offset + read : read
-    const strBuf = this.buf.slice(begin, begin + len)
+    const strBuf = this.buf.slice(offset + read, offset + read + len)
     return strBuf.toString('utf8')
   }
 
-  writeString (str: string, offset?: number): number {
+  writeString (str: string, offset: number = 0): number {
     const strBuf = Buffer.from(str, 'utf8')
     const len = this.writePackedUInt32(strBuf.length, offset)
-    const begin = offset ? offset + len : len
-    strBuf.copy(this.buf, begin)
+    strBuf.copy(this.buf, offset + len)
     return len + strBuf.length
   }
 
-  // todo: hazel messages
-  // todo: ipv4
+  readIPv4 (offset: number = 0): string {
+    return Array.from(this.buf.slice(offset, offset + 4)).join('.')
+  }
+
+  writeIPv4 (address: string, offset: number = 0): number {
+    const parts = address.split('.').map(Number)
+    parts.forEach((part, i) => this.buf.writeUInt8(part, offset + i))
+    return 4
+  }
+
+  readHazelMessage (offset: number = 0): HazelMessage {
+    const length = this.buf.readUInt16BE(offset)
+    const tag = this.buf.readUInt8(offset + 2)
+    const data = this.buf.slice(offset + 3, offset + 3 + length)
+    return { tag: tag, data: new HazelBuffer(data) }
+  }
+
+  writeHazelMessage (message: HazelMessage, offset?: number): number {
+    offset = offset ?? 0
+    this.buf.writeUInt16BE(message.data.length, offset)
+    this.buf.writeUInt8(message.tag, offset + 2)
+    message.data.copy(this.buf, offset + 3)
+    return 3 + message.data.length
+  }
 
   slice (begin?: number, end?: number): HazelBuffer {
     return new HazelBuffer(this.buf.slice(begin, end))
