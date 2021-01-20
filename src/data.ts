@@ -49,6 +49,14 @@ export class HazelBuffer {
     return this.buf.writeUInt8(byte, offset)
   }
 
+  readBoolean (offset?: number): boolean {
+    return this.buf.readUInt8(offset) === 1
+  }
+
+  writeBoolean (bool: boolean, offset?: number): number {
+    return this.buf.writeUInt8(bool ? 1 : 0, offset)
+  }
+
   readSByte (offset?: number): number {
     return this.buf.readInt8(offset)
   }

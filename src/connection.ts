@@ -59,41 +59,44 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
 
   async sendNormal (...messages: HazelMessage[]) {
     const length = messages.reduce((a, b) => a + b.data.length + 3, 1)
-    const buf = Buffer.alloc(length)
-    this.writeMessages(buf, 1, messages)
+    const buf = HazelBuffer.alloc(length)
+    buf.writeByte(PacketType.NORMAL)
+
+    let cursor = 1
+    messages.forEach((message) => cursor += buf.writeHazelMessage(message, cursor))
+
     return this.sendRaw(buf)
   }
 
   async sendReliable (...messages: HazelMessage[]) {
     const nonce = this.getNonce()
     const length = messages.reduce((a, b) => a + b.data.length + 3, 3)
-    const buf = Buffer.alloc(length)
-    buf.writeUInt8(PacketType.RELIABLE)
-    buf.writeUInt16BE(nonce, 1)
-    this.writeMessages(buf, 3, messages)
+    const buf = HazelBuffer.alloc(length)
+    buf.writeByte(PacketType.RELIABLE)
+    buf.writeUInt16(nonce, 1)
 
-    // todo: retry if not acknowledged & disconnect if not ack'd after a few retries
+    let cursor = 3
+    messages.forEach((message) => cursor += buf.writeHazelMessage(message, cursor))
+
+    // todo: retry if not acknowledged & disconnect if not ack'd after a few retries (resolve promise once ack'd)
     return this.sendRaw(buf)
   }
 
-  async disconnect (force?: boolean) { // todo: reason & message
+  async disconnect (force?: boolean) {
     this.emit('close')
-    return this.sendRaw(Buffer.from([ PacketType.DISCONNECT, force ? 0 : 1 ]))
+
+    // todo: reason & message
+    const buf = HazelBuffer.alloc(2)
+    buf.writeByte(PacketType.DISCONNECT)
+    buf.writeBoolean(!force)
+    return this.sendRaw(buf)
   }
 
-  private writeMessages (buffer: Buffer, offset: number, messages: HazelMessage[]) {
-    let cursor = 0
-    for (const message of messages) {
-      buffer.writeUInt16BE(message.data.length, offset + cursor)
-      buffer.writeUInt8(message.tag, offset + cursor + 2)
-      message.data.copy(buffer, offset + cursor + 3)
-      cursor += message.data.length + 3
-    }
-  }
+  private async sendRaw (data: HazelBuffer): Promise<number> {
+    const buf = 'toBuffer' in data ? data.toBuffer() : data
 
-  private async sendRaw (data: Buffer): Promise<number> {
     return new Promise((resolve, reject) => {
-      this.socket.send(data, this.remote.port, this.remote.address, (err, bytes) => {
+      this.socket.send(buf, this.remote.port, this.remote.address, (err, bytes) => {
         if (err) {
           reject(err)
         } else {
@@ -111,10 +114,10 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
       }
     }
   
-    const buf = Buffer.alloc(4)
-    buf.writeUInt8(PacketType.ACKNOWLEDGEMENT)
-    buf.writeUInt16BE(nonce, 1)
-    buf.writeUInt8(pending, 3)
+    const buf = HazelBuffer.alloc(4)
+    buf.writeByte(PacketType.ACKNOWLEDGEMENT)
+    buf.writeUInt16(nonce, 1)
+    buf.writeByte(pending, 3)
     return this.sendRaw(buf)
   }
 
@@ -127,20 +130,20 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
     this.pendingPings.set(nonce, Date.now())
     this.pendingAck.add(nonce)
 
-    const buf = Buffer.alloc(3)
-    buf.writeUInt8(PacketType.PING)
-    buf.writeUInt16BE(nonce, 1)
+    const buf = HazelBuffer.alloc(3)
+    buf.writeByte(PacketType.PING)
+    buf.writeUInt16(nonce, 1)
     return this.sendRaw(buf)
   }
 
   private handleMessage (msg: Buffer) {
     switch (msg[0]) {
       case PacketType.NORMAL:
-        this.handleMessagePacket(msg, false)
+        this.handleMessagePacket(new HazelBuffer(msg), false)
         break
       case PacketType.HELLO:
       case PacketType.RELIABLE:
-        this.handleMessagePacket(msg, true)
+        this.handleMessagePacket(new HazelBuffer(msg), true)
         break
       case PacketType.DISCONNECT:
         this.emit('close') // todo: parse reason & stuff?
@@ -165,15 +168,15 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
     }
   }
 
-  private handleMessagePacket (msg: Buffer, ack: boolean) {
+  private handleMessagePacket (msg: HazelBuffer, ack: boolean) {
     let cursor = ack ? 3 : 1
     if (msg.length < cursor) {
       this.disconnect(true)
       return
     }
 
-    if (ack) this.sendAck(msg.readUInt16BE(1))
-    const isHello = msg[0] === PacketType.HELLO
+    if (ack) this.sendAck(msg.readUInt16(1))
+    const isHello = msg.readByte(0) === PacketType.HELLO
     if (isHello) {
       if (this.seenHello || msg.length < 4) {
         this.disconnect(true)
@@ -181,22 +184,20 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
       }
 
       this.seenHello = true
-      const hazelVer = msg[3]
+      const hazelVer = msg.readByte(3)
       if (hazelVer !== HAZEL_VERSION) {
         this.disconnect(true)
         return
       }
 
-      this.emit('hello', new HazelBuffer(msg.slice(4, msg.length)))
+      this.emit('hello', msg.slice(4, msg.length))
       return
     }
 
     while (cursor < msg.length) {
-      const length = msg.readUInt16BE(cursor)
-      const tag = msg.readUInt8(cursor += 2)
-      const data = new HazelBuffer(msg.slice(++cursor, cursor += length))
-
-      this.emit('message', { tag: tag, data: data })
+      const message = msg.readHazelMessage(cursor)
+      cursor += 3 + message.data.length
+      this.emit('message', message)
     }
   }
 
