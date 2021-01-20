@@ -29,6 +29,7 @@ import TypedEventEmitter from './emitter.js'
 
 type ClientEvents = {}
 
+// [Cynthia] The client can probably just extend Connection, and I honestly think it'd do the trick just fine. I'll see.
 export default class Client extends TypedEventEmitter<ClientEvents> {
   constructor () {
     super()

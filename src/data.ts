@@ -25,6 +25,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+import { inspect } from 'util'
+
 const PACKED_INT_LENGTH = [
   Math.pow(2, 7),
   Math.pow(2, 14),
@@ -195,5 +197,10 @@ export class HazelBuffer {
 
   static alloc (size: number): HazelBuffer {
     return new HazelBuffer(Buffer.alloc(size))
+  }
+
+  [inspect.custom]() {
+    const res = inspect(this.buf)
+    res.replace('Buffer', 'HazelBuffer')
   }
 }

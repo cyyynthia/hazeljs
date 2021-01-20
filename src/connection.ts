@@ -34,7 +34,7 @@ type ConnectionEvents = {
   hello: (msg: HazelBuffer) => void
   message: (msg: HazelMessage) => void
 
-  close: () => void
+  close: (forced: boolean, reason?: number, message?: string) => void
   data: (msg: Buffer) => void
 }
 
@@ -50,7 +50,7 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
     return this.lastPings.reduce((a, b) => a + b, 0) / 5
   }
 
-  constructor (private readonly remote: RemoteInfo, private readonly socket: Socket) {
+  constructor (public readonly remote: RemoteInfo, private readonly socket: Socket) {
     super()
 
     this.once('close', () => {
@@ -104,21 +104,32 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
     })
   }
 
-  async disconnect (force?: boolean): Promise<number> {
-    this.emit('close')
+  async disconnect (forced: boolean = false, reason?: number, message?: string): Promise<number> {
+    this.emit('close', forced, reason, message)
 
-    // todo: reason & message
+    if (!forced && typeof reason !== 'undefined') {
+      const reasonLength = 1 + (message ? HazelBuffer.getPackedUInt32Size(message.length) + message.length : 0)
+      const reasonBuf = HazelBuffer.alloc(reasonLength)
+      reasonBuf.writeByte(reason)
+      if (message) reasonBuf.writeString(message, 1)
+
+      const buf = HazelBuffer.alloc(5 + reasonLength)
+      buf.writeByte(PacketType.DISCONNECT)
+      buf.writeBoolean(!forced)
+      buf.writeHazelMessage({ tag: 0, data: reasonBuf })
+
+      return this.sendRaw(buf)
+    }
+
     const buf = HazelBuffer.alloc(2)
     buf.writeByte(PacketType.DISCONNECT)
-    buf.writeBoolean(!force)
+    buf.writeBoolean(true)
     return this.sendRaw(buf)
   }
 
   private async sendRaw (data: HazelBuffer): Promise<number> {
-    const buf = 'toBuffer' in data ? data.toBuffer() : data
-
     return new Promise((resolve, reject) => {
-      this.socket.send(buf, this.remote.port, this.remote.address, (err, bytes) => {
+      this.socket.send(data.toBuffer(), this.remote.port, this.remote.address, (err, bytes) => {
         if (err) {
           reject(err)
         } else {
@@ -164,6 +175,7 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
   }
 
   private handleMessage (msg: Buffer) {
+    // todo: dedupe?
     switch (msg[0]) {
       case PacketType.NORMAL:
         this.handleMessagePacket(new HazelBuffer(msg), false)
@@ -173,7 +185,17 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
         this.handleMessagePacket(new HazelBuffer(msg), true)
         break
       case PacketType.DISCONNECT:
-        this.emit('close') // todo: parse reason & stuff?
+        if (msg.length === 1) {
+          this.emit('close', true)
+        } else {
+          const buf = new HazelBuffer(msg)
+          const message = buf.readHazelMessage(2).data
+          if (message.length > 1) {
+            this.emit('close', !buf.readBoolean(1), message.readByte(), message.readString(1))
+          } else {
+            this.emit('close', !buf.readBoolean(1), message.readByte())
+          }
+        }
         break
       case PacketType.ACKNOWLEDGEMENT:
         if (msg.length >= 3) {

@@ -35,6 +35,7 @@ import { PacketType } from './constants.js'
 type ServerEvents = {
   listening: (addr: AddressInfo) => void
   connection: (conn: Connection) => void
+  error: (err: Error) => void
   close: () => void
 }
 
@@ -51,6 +52,7 @@ export default class Server extends TypedEventEmitter<ServerEvents> {
     // Proxy events
     this.socket.on('listening', () => this.emit('listening', this.socket.address()))
     this.socket.on('close', () => this.emit('close'))
+    this.socket.on('error', (err) => this.emit('error', err))
   }
 
   async listen (port?: number, bind?: string): Promise<void> {
@@ -61,8 +63,7 @@ export default class Server extends TypedEventEmitter<ServerEvents> {
     return new Promise<void>((resolve) => {
       const disconnectPromises = []
       for (const connection of this.connections.values()) {
-        // todo: send a message once its supported
-        disconnectPromises.push(connection.disconnect())
+        disconnectPromises.push(connection.disconnect(true))
       }
 
       Promise.allSettled(disconnectPromises).then(() => {
