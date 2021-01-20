@@ -5,7 +5,6 @@ TypeScript implementation of the [Hazel-Networking](https://github.com/willardf/
 should because udp is a bitch), and only supports the server-side (and probably poorly).
 
 It's currently lacking some very important stuff:
- - ensure reliable messages are acknowledged (& retry)
  - full support of the disconnect payload
  - dedupe packets?
 

@@ -40,8 +40,8 @@ type ConnectionEvents = {
 
 export default class Connection extends TypedEventEmitter<ConnectionEvents> {
   private readonly pingTimer = setInterval(() => this.sendPing(), 1500)
-  private pendingPings = new Map<number, number>()
-  private pendingAck = new Set()
+  private pendingAck = new Map<number, () => void>()
+  private pendingPings = 0
   private lastPings = [ 0, 0, 0, 0, 0 ]
   private seenHello = false
   private nonce = 0
@@ -53,11 +53,14 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
   constructor (private readonly remote: RemoteInfo, private readonly socket: Socket) {
     super()
 
-    this.once('close', () => clearInterval(this.pingTimer))
+    this.once('close', () => {
+      clearInterval(this.pingTimer)
+      this.pendingAck.clear() // Clear memory
+    })
     this.on('data', (msg) => this.handleMessage(msg))
   }
 
-  async sendNormal (...messages: HazelMessage[]) {
+  async sendNormal (...messages: HazelMessage[]): Promise<number> {
     const length = messages.reduce((a, b) => a + b.data.length + 3, 1)
     const buf = HazelBuffer.alloc(length)
     buf.writeByte(PacketType.NORMAL)
@@ -68,7 +71,7 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
     return this.sendRaw(buf)
   }
 
-  async sendReliable (...messages: HazelMessage[]) {
+  async sendReliable (...messages: HazelMessage[]): Promise<number> {
     const nonce = this.getNonce()
     const length = messages.reduce((a, b) => a + b.data.length + 3, 3)
     const buf = HazelBuffer.alloc(length)
@@ -78,11 +81,30 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
     let cursor = 3
     messages.forEach((message) => cursor += buf.writeHazelMessage(message, cursor))
 
-    // todo: retry if not acknowledged & disconnect if not ack'd after a few retries (resolve promise once ack'd)
-    return this.sendRaw(buf)
+    return new Promise<number>((resolve, reject) => {
+      let attempts = 0
+      let bytes = -1
+      const send = async () => (bytes = await this.sendRaw(buf))
+      const interval = setInterval(() => {
+        if (attempts === 10) {
+          clearInterval(interval)
+          reject(new Error('Reliable message not acknowledged after 10 attempts.'))
+          this.disconnect(true)
+        } else {
+          send()
+          attempts++
+        }
+      }, 300)
+
+      send()
+      this.pendingAck.set(nonce, () => {
+        clearInterval(interval)
+        resolve(bytes)
+      })
+    })
   }
 
-  async disconnect (force?: boolean) {
+  async disconnect (force?: boolean): Promise<number> {
     this.emit('close')
 
     // todo: reason & message
@@ -122,13 +144,17 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
   }
 
   private async sendPing (): Promise<number> {
-    if (this.pendingPings.size >= 10) {
+    if (this.pendingPings >= 10) {
       return this.disconnect(true)
     }
 
     const nonce = this.getNonce()
-    this.pendingPings.set(nonce, Date.now())
-    this.pendingAck.add(nonce)
+    const pingTime = Date.now()
+    this.pendingAck.set(nonce, () => {
+      this.pendingPings--
+      this.lastPings.shift()
+      this.lastPings.push(Date.now() - pingTime)
+    })
 
     const buf = HazelBuffer.alloc(3)
     buf.writeByte(PacketType.PING)
@@ -151,12 +177,10 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
       case PacketType.ACKNOWLEDGEMENT:
         if (msg.length >= 3) {
           const id = msg.readUInt16BE(1)
-          if (this.pendingPings.has(id)) {
-            this.lastPings.shift()
-            this.lastPings.push(Date.now() - this.pendingPings.get(id)!)
-            this.pendingPings.delete(id)
+          if (this.pendingAck.has(id)) {
+            this.pendingAck.get(id)!()
+            this.pendingAck.delete(id)
           }
-          this.pendingAck.delete(id)
         }
         break
       case PacketType.FRAGMENT:
