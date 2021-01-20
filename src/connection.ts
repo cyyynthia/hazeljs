@@ -57,19 +57,38 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
     this.on('data', (msg) => this.handleMessage(msg))
   }
 
-  // @ts-ignore
-  async sendNormal (message: HazelMessage) { // todo
+  async sendNormal (...messages: HazelMessage[]) {
+    const length = messages.reduce((a, b) => a + b.data.length + 3, 1)
+    const buf = Buffer.alloc(length)
+    this.writeMessages(buf, 1, messages)
+    return this.sendRaw(buf)
   }
 
-  // @ts-ignore
-  async sendReliable (message: HazelMessage) { // todo
-    // @ts-ignore
+  async sendReliable (...messages: HazelMessage[]) {
     const nonce = this.getNonce()
+    const length = messages.reduce((a, b) => a + b.data.length + 3, 3)
+    const buf = Buffer.alloc(length)
+    buf.writeUInt8(PacketType.RELIABLE)
+    buf.writeUInt16BE(nonce, 1)
+    this.writeMessages(buf, 3, messages)
+
+    // todo: retry if not acknowledged & disconnect if not ack'd after a few retries
+    return this.sendRaw(buf)
   }
 
   async disconnect (force?: boolean) { // todo: reason & message
     this.emit('close')
     return this.sendRaw(Buffer.from([ PacketType.DISCONNECT, force ? 0 : 1 ]))
+  }
+
+  private writeMessages (buffer: Buffer, offset: number, messages: HazelMessage[]) {
+    let cursor = 0
+    for (const message of messages) {
+      buffer.writeUInt16BE(message.data.length, offset + cursor)
+      buffer.writeUInt8(message.tag, offset + cursor + 2)
+      message.data.copy(buffer, offset + cursor + 3)
+      cursor += message.data.length + 3
+    }
   }
 
   private async sendRaw (data: Buffer): Promise<number> {

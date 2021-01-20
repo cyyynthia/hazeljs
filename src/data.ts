@@ -37,6 +37,10 @@ export type HazelMessage = { tag: number, data: HazelBuffer }
 export class HazelBuffer {
   constructor (private readonly buf: Buffer) {}
 
+  get length () {
+    return this.buf.length
+  }
+
   readByte (offset?: number): number {
     return this.buf.readUInt8(offset)
   }
@@ -141,7 +145,14 @@ export class HazelBuffer {
 
   // todo: hazel messages
   // todo: ipv4
-  // todo: vectors
+
+  slice (begin?: number, end?: number): HazelBuffer {
+    return new HazelBuffer(this.buf.slice(begin, end))
+  }
+
+  copy (target: Buffer, targetStart?: number, sourceStart?: number, sourceEnd?: number): number {
+    return this.buf.copy(target, targetStart, sourceStart, sourceEnd)
+  }
 
   toBuffer (): Buffer {
     return this.buf
