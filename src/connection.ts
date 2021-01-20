@@ -31,7 +31,7 @@ import { HazelMessage, HazelBuffer } from './data.js'
 import { HAZEL_VERSION, PacketType } from './constants.js'
 
 type ConnectionEvents = {
-  hello: (msg: Buffer) => void
+  hello: (msg: HazelBuffer) => void
   message: (msg: HazelMessage) => void
 
   close: () => void
@@ -187,7 +187,7 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
         return
       }
 
-      this.emit('hello', msg.slice(4, msg.length))
+      this.emit('hello', new HazelBuffer(msg.slice(4, msg.length)))
       return
     }
 
