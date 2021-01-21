@@ -31,12 +31,10 @@ import { HazelMessage, HazelBuffer } from './data.js'
 import { HAZEL_VERSION, PacketType } from './constants.js'
 
 type ConnectionEvents = {
-  // todo: move hello to server
-  hello: (msg: HazelBuffer) => void
   message: (msg: HazelMessage) => void
-
   close: (forced: boolean, reason?: number, message?: string) => void
   data: (msg: Buffer) => void
+  error: (err: Error) => void
 }
 
 export default class Connection extends TypedEventEmitter<ConnectionEvents> {
@@ -59,6 +57,7 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
       this.pendingAck.clear() // Clear memory
     })
     this.on('data', (msg) => this.handleMessage(msg))
+    socket.on('error', (err) => this.emit('error', err))
   }
 
   async sendNormal (...messages: HazelMessage[]): Promise<number> {
@@ -142,8 +141,6 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
   }
 
   async disconnect (forced: boolean = false, reason?: number, message?: string): Promise<number> {
-    this.emit('close', forced, reason, message)
-
     if (!forced && typeof reason !== 'undefined') {
       const reasonLength = 1 + (message ? HazelBuffer.getPackedUInt32Size(message.length) + message.length : 0)
       const reasonBuf = HazelBuffer.alloc(reasonLength)
@@ -161,6 +158,8 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
     const buf = HazelBuffer.alloc(2)
     buf.writeByte(PacketType.DISCONNECT)
     buf.writeBoolean(true)
+
+    this.emit('close', forced, reason, message)
     return this.sendRaw(buf)
   }
 
@@ -247,25 +246,12 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
       return
     }
 
-    if (ack) this.sendAck(msg.readUInt16(1))
-    const isHello = msg.readByte(0) === PacketType.HELLO
-    if (isHello) {
-      if (this.seenHello || msg.length < 4) {
-        this.disconnect(true)
-        return
-      }
-
-      this.seenHello = true
-      const hazelVer = msg.readByte(3)
-      if (hazelVer !== HAZEL_VERSION) {
-        this.disconnect(true)
-        return
-      }
-
-      this.emit('hello', msg.slice(4, msg.length))
+    if (msg.readByte(0) === PacketType.HELLO) {
+      this.disconnect(true)
       return
     }
 
+    if (ack) this.sendAck(msg.readUInt16(1))
     while (cursor < msg.length) {
       const message = msg.readHazelMessage(cursor)
       cursor += 3 + message.data.length

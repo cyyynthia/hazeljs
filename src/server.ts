@@ -28,13 +28,14 @@
 import type { RemoteInfo } from 'dgram'
 import type { AddressInfo } from 'net'
 import { createSocket } from 'dgram'
+import { HazelBuffer } from './data.js'
 import TypedEventEmitter from './emitter.js'
 import Connection from './connection.js'
-import { PacketType } from './constants.js'
+import { HAZEL_VERSION, PacketType } from './constants.js'
 
 type ServerEvents = {
   listening: (addr: AddressInfo) => void
-  connection: (conn: Connection) => void
+  connection: (conn: Connection, hello: HazelBuffer) => void
   error: (err: Error) => void
   close: () => void
 }
@@ -78,11 +79,19 @@ export default class Server extends TypedEventEmitter<ServerEvents> {
     const ip = `${remote.address}:${remote.port}`
     if (!this.connections.has(ip)) {
       if (msg[0] === PacketType.HELLO) {
+        if (msg.length < 4) return
+
+        const hazelVer = msg.readUInt8(3)
+        if (hazelVer !== HAZEL_VERSION) {
+          this.socket.send(Buffer.from([ PacketType.DISCONNECT ]), remote.port, remote.address)
+          return
+        }
+
         const connection = new Connection(remote, this.socket)
-        this.emit('connection', connection)
+        this.emit('connection', connection, new HazelBuffer(msg.slice(4, msg.length)))
         this.connections.set(ip, connection)
 
-        connection.on('close', () => this.connections.delete(ip))
+        connection.once('close', () => this.connections.delete(ip))
       }
     }
 

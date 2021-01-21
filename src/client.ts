@@ -29,13 +29,13 @@ import { createSocket } from 'dgram'
 import { HazelBuffer, HazelMessage } from './data.js'
 import TypedEventEmitter from './emitter.js'
 import Connection from './connection.js'
-import { PacketType } from './constants.js'
+import { HAZEL_VERSION, PacketType } from './constants.js'
 
 type ClientEvents = {
   connected: () => void
   message: (msg: HazelMessage) => void
-
   close: (forced: boolean, reason?: number, message?: string) => void
+  error: (err: Error) => void
 }
 
 export default class Client extends TypedEventEmitter<ClientEvents> {
@@ -49,13 +49,15 @@ export default class Client extends TypedEventEmitter<ClientEvents> {
   constructor (address: string, port: number, ipv6?: boolean) {
     super()
 
+    const socket = createSocket(ipv6 ? 'udp6' : 'udp4')
     this.connection = new Connection(
       { address: address, port: port, family: ipv6 ? 'IPv6' : 'IPv4', size: 0 },
-      createSocket(ipv6 ? 'udp6' : 'udp4')
+      socket
     )
 
+    this.connection.on('error', (err) => this.emit('error', err))
     this.connection.on('close', (forced, reason, message) => this.emit('close', forced, reason, message))
-    this.connection.on('message', (msg: HazelMessage) => this.emit('message', msg))
+    this.connection.on('message', (msg) => this.emit('message', msg))
   }
 
   async sendNormal (...messages: HazelMessage[]): Promise<number> {
@@ -75,7 +77,8 @@ export default class Client extends TypedEventEmitter<ClientEvents> {
     const hello = HazelBuffer.alloc(4 + (msg?.length ?? 0))
     hello.writeByte(PacketType.HELLO)
     hello.writeUInt16(nonce, 1)
-    if (msg) hello.writeBuffer(msg, 3)
+    hello.writeByte(HAZEL_VERSION, 3)
+    if (msg) hello.writeBuffer(msg, 4)
 
     const promise = this.connection.sendRawReliable(hello, nonce)
     promise.then(() => this.emit('connected'))

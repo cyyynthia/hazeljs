@@ -29,12 +29,9 @@ Here's a basic example:
 import { Server } from '@cyyynthia/hazeljs'
 
 const server = new Server() // To create an IPv6 server: new Server(true)
-server.on('connection', (connection) => {
+server.on('connection', (connection, hello) => {
   console.log(`New connection from ${connection.remote.address}:${connection.remote.port}`)
-
-  connection.on('hello', (msg) => {
-    console.log('Hello received', msg)
-  })
+  console.log(`Hello payload:`, hello)
 
   connection.on('message', (msg) => {
     console.log('Message received', msg)
