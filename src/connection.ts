@@ -28,7 +28,7 @@
 import type { Socket, RemoteInfo } from 'dgram'
 import TypedEventEmitter from './emitter.js'
 import { HazelMessage, HazelBuffer } from './data.js'
-import { HAZEL_VERSION, PacketType } from './constants.js'
+import { PacketType } from './constants.js'
 
 type ConnectionEvents = {
   message: (msg: HazelMessage) => void
@@ -42,7 +42,6 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
   private pendingAck = new Map<number, () => void>()
   private pendingPings = 0
   private lastPings = [ 0, 0, 0, 0, 0 ]
-  private seenHello = false
   private nonce = 0
 
   get ping () {
