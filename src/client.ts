@@ -81,7 +81,10 @@ export default class Client extends TypedEventEmitter<ClientEvents> {
     if (msg) hello.writeBuffer(msg, 4)
 
     const promise = this.connection.sendRawReliable(hello, nonce)
-    promise.then(() => this.emit('connected'))
+    promise.then(() => {
+      this.connected = true
+      this.emit('connected')
+    })
     return promise
   }
 
@@ -90,6 +93,7 @@ export default class Client extends TypedEventEmitter<ClientEvents> {
       throw new Error('Already connected!')
     }
 
+    this.connected = false
     return this.connection.disconnect(forced, reason, message)
   }
 }
