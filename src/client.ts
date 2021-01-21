@@ -1,9 +1,9 @@
 /*
  * Copyright (c) 2021 Cynthia K. Rey, All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  * 1. Redistributions of source code must retain the above copyright notice, this
  *    list of conditions and the following disclaimer.
  * 2. Redistributions in binary form must reproduce the above copyright notice,
@@ -12,7 +12,7 @@
  * 3. Neither the name of the copyright holder nor the names of its contributors
  *    may be used to endorse or promote products derived from this software without
  *    specific prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
  * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
@@ -25,14 +25,68 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+import { createSocket } from 'dgram'
+import { HazelBuffer, HazelMessage } from './data.js'
 import TypedEventEmitter from './emitter.js'
+import Connection from './connection.js'
+import { PacketType } from './constants.js'
 
-type ClientEvents = {}
+type ClientEvents = {
+  connected: () => void
+  message: (msg: HazelMessage) => void
 
-// [Cynthia] The client can probably just extend Connection, and I honestly think it'd do the trick just fine. I'll see.
+  close: (forced: boolean, reason?: number, message?: string) => void
+}
+
 export default class Client extends TypedEventEmitter<ClientEvents> {
-  constructor () {
+  private connection: Connection
+  connected: boolean = false
+
+  get ping () {
+    return this.connection.ping
+  }
+
+  constructor (address: string, port: number, ipv6?: boolean) {
     super()
-    throw new Error('Not implemented')
+
+    this.connection = new Connection(
+      { address: address, port: port, family: ipv6 ? 'IPv6' : 'IPv4', size: 0 },
+      createSocket(ipv6 ? 'udp6' : 'udp4')
+    )
+
+    this.connection.on('close', (forced, reason, message) => this.emit('close', forced, reason, message))
+    this.connection.on('message', (msg: HazelMessage) => this.emit('message', msg))
+  }
+
+  async sendNormal (...messages: HazelMessage[]): Promise<number> {
+    return this.connection.sendNormal(...messages)
+  }
+
+  async sendReliable (...messages: HazelMessage[]): Promise<number> {
+    return this.connection.sendReliable(...messages)
+  }
+
+  async connect (msg?: HazelBuffer): Promise<number> {
+    if (this.connected) {
+      throw new Error('Already connected!')
+    }
+
+    const nonce = this.connection.generateNonce()
+    const hello = HazelBuffer.alloc(4 + (msg?.length ?? 0))
+    hello.writeByte(PacketType.HELLO)
+    hello.writeUInt16(nonce, 1)
+    if (msg) hello.writeBuffer(msg, 3)
+
+    const promise = this.connection.sendRawReliable(hello, nonce)
+    promise.then(() => this.emit('connected'))
+    return promise
+  }
+
+  async disconnect (forced: boolean = false, reason?: number, message?: string): Promise<number> {
+    if (!this.connected) {
+      throw new Error('Already connected!')
+    }
+
+    return this.connection.disconnect(forced, reason, message)
   }
 }

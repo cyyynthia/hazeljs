@@ -48,8 +48,24 @@ server.on('connection', (connection) => {
   })
 })
 
-server.listen(1337)
+server.listen(1337, '127.0.0.1')
 ```
 
 ### Client
-The client hasn't been implemented in HazelJS yet. :(
+```js
+import { Client } from '@cyyynthia/hazeljs'
+
+const client = new Client() // To create an IPv6 client: new Client('127.0.0.1', 1337, true)
+
+client.on('connected', () => {
+  console.log('Connected!')
+
+  client.sendNormal(...)
+})
+
+client.on('message', (msg) => {
+  console.log('Message received', msg)
+})
+
+client.connect()
+```

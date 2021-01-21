@@ -1,9 +1,9 @@
 /*
  * Copyright (c) 2021 Cynthia K. Rey, All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  * 1. Redistributions of source code must retain the above copyright notice, this
  *    list of conditions and the following disclaimer.
  * 2. Redistributions in binary form must reproduce the above copyright notice,
@@ -12,7 +12,7 @@
  * 3. Neither the name of the copyright holder nor the names of its contributors
  *    may be used to endorse or promote products derived from this software without
  *    specific prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
  * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
@@ -31,6 +31,7 @@ import { HazelMessage, HazelBuffer } from './data.js'
 import { HAZEL_VERSION, PacketType } from './constants.js'
 
 type ConnectionEvents = {
+  // todo: move hello to server
   hello: (msg: HazelBuffer) => void
   message: (msg: HazelMessage) => void
 
@@ -72,7 +73,7 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
   }
 
   async sendReliable (...messages: HazelMessage[]): Promise<number> {
-    const nonce = this.getNonce()
+    const nonce = this.generateNonce()
     const length = messages.reduce((a, b) => a + b.data.length + 3, 3)
     const buf = HazelBuffer.alloc(length)
     buf.writeByte(PacketType.RELIABLE)
@@ -85,6 +86,42 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
       let attempts = 0
       let bytes = -1
       const send = async () => (bytes = await this.sendRaw(buf))
+      const interval = setInterval(() => {
+        if (attempts === 10) {
+          clearInterval(interval)
+          reject(new Error('Reliable message not acknowledged after 10 attempts.'))
+          this.disconnect(true)
+        } else {
+          send()
+          attempts++
+        }
+      }, 300)
+
+      send()
+      this.pendingAck.set(nonce, () => {
+        clearInterval(interval)
+        resolve(bytes)
+      })
+    })
+  }
+
+  async sendRaw (data: HazelBuffer): Promise<number> {
+    return new Promise<number>((resolve, reject) => {
+      this.socket.send(data.toBuffer(), this.remote.port, this.remote.address, (err, bytes) => {
+        if (err) {
+          reject(err)
+        } else {
+          resolve(bytes)
+        }
+      })
+    })
+  }
+
+  async sendRawReliable (data: HazelBuffer, nonce: number): Promise<number> {
+    return new Promise<number>((resolve, reject) => {
+      let attempts = 0
+      let bytes = -1
+      const send = async () => (bytes = await this.sendRaw(data))
       const interval = setInterval(() => {
         if (attempts === 10) {
           clearInterval(interval)
@@ -127,18 +164,6 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
     return this.sendRaw(buf)
   }
 
-  private async sendRaw (data: HazelBuffer): Promise<number> {
-    return new Promise((resolve, reject) => {
-      this.socket.send(data.toBuffer(), this.remote.port, this.remote.address, (err, bytes) => {
-        if (err) {
-          reject(err)
-        } else {
-          resolve(bytes)
-        }
-      })
-    })
-  }
-
   private async sendAck (nonce: number): Promise<number> {
     let pending = 0
     for (let i = 1; i <= 8; i++) {
@@ -159,7 +184,7 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
       return this.disconnect(true)
     }
 
-    const nonce = this.getNonce()
+    const nonce = this.generateNonce()
     const pingTime = Date.now()
     this.pendingAck.set(nonce, () => {
       this.pendingPings--
@@ -174,7 +199,7 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
     return this.sendRaw(buf)
   }
 
-  private handleMessage (msg: Buffer) {
+  private handleMessage (msg: Buffer): void {
     // todo: dedupe?
     switch (msg[0]) {
       case PacketType.NORMAL:
@@ -215,7 +240,7 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
     }
   }
 
-  private handleMessagePacket (msg: HazelBuffer, ack: boolean) {
+  private handleMessagePacket (msg: HazelBuffer, ack: boolean): void {
     let cursor = ack ? 3 : 1
     if (msg.length < cursor) {
       this.disconnect(true)
@@ -248,7 +273,7 @@ export default class Connection extends TypedEventEmitter<ConnectionEvents> {
     }
   }
 
-  private getNonce () {
+  generateNonce (): number {
     this.nonce = (this.nonce + 1) % 65535
     return this.nonce
   }

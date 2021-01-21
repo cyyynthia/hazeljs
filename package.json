@@ -1,6 +1,6 @@
 {
   "name": "@cyyynthia/hazeljs",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "TypeScript implementation of the Hazel-Networking C# net library.",
   "type": "module",
   "repository": "git@github.com:cyyynthia/hazeljs.git",
